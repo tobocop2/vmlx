@@ -166,8 +166,8 @@ def cmd_msgcount():
         raw = open(sys.argv[2], errors="replace").read()
     except OSError:
         raw = ""
-    m = re.search(r"(\d+) tokens", raw)
-    print(m.group(1) if m else "-")
+    m = re.search(r"([\d,]+) tokens", raw)
+    print(m.group(1).replace(",", "") if m else "-")
 
 
 globals()["cmd_" + sys.argv[1]]()
