@@ -1,5 +1,8 @@
 name: Model test
 
+# workflow_dispatch is the intended trigger. GitHub only registers a dispatch workflow that
+# exists on the default branch, and this one lives on ci/model-test alone, so a push of
+# acceptance/run-request.env to ci/model-test carries the same four inputs.
 on:
   workflow_dispatch:
     inputs:
@@ -18,6 +21,9 @@ on:
         description: Optional patch file under acceptance/ applied to src/ before install
         required: false
         default: ""
+  push:
+    branches: [ci/model-test]
+    paths: [acceptance/run-request.env]
 
 permissions:
   contents: read
@@ -31,37 +37,49 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+      - name: Resolve request
+        env:
+          IN_REF: ${{ inputs.ref }}
+          IN_ITEM: ${{ inputs.item }}
+          IN_ONLY: ${{ inputs.only }}
+          IN_PROBE: ${{ inputs.probe_patch }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            { echo "REQ_REF=$IN_REF"; echo "REQ_ITEM=$IN_ITEM"; echo "REQ_ONLY=$IN_ONLY"; echo "REQ_PROBE=$IN_PROBE"; } >> "$GITHUB_ENV"
+          else
+            grep -E '^(REF|ITEM|ONLY|PROBE)=[A-Za-z0-9_./,:-]*$' acceptance/run-request.env | sed 's/^/REQ_/' >> "$GITHUB_ENV"
+          fi
+          grep '^REQ_' "$GITHUB_ENV"
       - name: Checkout ref under test
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ env.REQ_REF }}
           path: src
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Apply probe patch
-        if: ${{ inputs.probe_patch != '' }}
-        env:
-          PROBE: ${{ inputs.probe_patch }}
-        run: git -C src apply --verbose "$GITHUB_WORKSPACE/acceptance/$PROBE"
+        if: ${{ env.REQ_PROBE != '' }}
+        run: git -C src apply --verbose "$GITHUB_WORKSPACE/acceptance/$REQ_PROBE"
       - name: Install package under test and mlx-lm 0.31.3
         run: |
           python -m pip install --disable-pip-version-check ./src 'mlx-lm==0.31.3'
-          python -m pip list 2>/dev/null | grep -i -E '^(vmlx|mlx|mlx-lm|transformers|huggingface-hub) '
+          python -m pip list 2>/dev/null | grep -i -E '^(vmlx|mlx|mlx-lm|transformers|huggingface-hub) ' || true
           git -C src rev-parse HEAD
       - name: Prefetch model
         run: python -c "from huggingface_hub import snapshot_download; print(snapshot_download('mlx-community/Qwen3-0.6B-4bit'))"
+      - name: Metal check
+        run: python -c "import mlx.core as mx; print('default device', mx.default_device()); print(mx.metal.is_available())"
       - name: Run acceptance script
         id: accept
         env:
-          ITEM: ${{ inputs.item }}
-          ONLY: ${{ inputs.only }}
+          ONLY: ${{ env.REQ_ONLY }}
           WORK_ROOT: ${{ github.workspace }}/work
         run: |
           mkdir -p "$WORK_ROOT"
           rc=0
-          bash "acceptance/${ITEM}.sh" > run.log 2>&1 || rc=$?
+          bash "acceptance/${REQ_ITEM}.sh" > run.log 2>&1 || rc=$?
           echo "acceptance rc=$rc" | tee -a run.log
           echo "rc=$rc" >> "$GITHUB_OUTPUT"
       - name: Print result rows
@@ -71,7 +89,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: acceptance-${{ inputs.item }}
+          name: acceptance-${{ env.REQ_ITEM }}
           path: |
             run.log
             work/**
