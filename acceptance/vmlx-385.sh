@@ -277,9 +277,9 @@ EOF
   msgc=$(oracle msgcount "$out")
   ROWS=$((ROWS + 1))
   local got
-  if [ "$rc" -eq 28 ] && [ "$form" = "none" ]; then
+  if [ "$rc" -eq 28 ]; then
     got="timeout"
-    status="TIMEOUT"
+    [ "$form" = "none" ] && status="TIMEOUT"
     TIMEOUTS=$((TIMEOUTS + 1))
   elif [ "$code" = "prompt_too_long" ]; then
     got="reject"
@@ -290,6 +290,10 @@ EOF
   fi
   if [ "$stoks" != "-" ] && [ "$stoks" != "$ptoks" ]; then
     say "RESULT cell=$id verdict=VOID oracle token count $ptoks differs from the server's usage.prompt_tokens $stoks"
+    FAILS=$((FAILS + 1))
+  fi
+  if [ "$msgc" != "-" ] && [ "$msgc" != "$ptoks" ]; then
+    say "RESULT cell=$id verdict=VOID oracle token count $ptoks differs from the token count in the server's message $msgc"
     FAILS=$((FAILS + 1))
   fi
   if [ "$open" = "open" ]; then
@@ -371,7 +375,7 @@ CELLSPEC=(
   "C3-at-ceiling|chat|0|$AT|1|$WAIT_HANG|0|open"
   "C2-under-by-one|chat|0|$UNDER|1|$WAIT_FIT|0|"
   "C7-under-by-one-stream|chat|1|$UNDER|1|$WAIT_FIT|0|"
-  "C9-fits-output-over-remaining|chat|0|$((D - 10))|64|$WAIT_FIT|0|open"
+  "C9-fits-output-over-remaining|chat|0|$((D - 4))|64|$WAIT_FIT|0|open"
 )
 run_group default "$MODEL"
 
