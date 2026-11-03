@@ -1,0 +1,81 @@
+name: Model test
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Fork ref (branch or sha) under test
+        required: true
+      item:
+        description: Acceptance item (acceptance/<item>.sh)
+        required: true
+        default: vmlx-385
+      only:
+        description: Comma list of cell ids to run (default all)
+        required: false
+        default: all
+      probe_patch:
+        description: Optional patch file under acceptance/ applied to src/ before install
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  model-test:
+    runs-on: macos-15
+    timeout-minutes: 170
+    steps:
+      - name: Checkout harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Checkout ref under test
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.ref }}
+          path: src
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Apply probe patch
+        if: ${{ inputs.probe_patch != '' }}
+        env:
+          PROBE: ${{ inputs.probe_patch }}
+        run: git -C src apply --verbose "$GITHUB_WORKSPACE/acceptance/$PROBE"
+      - name: Install package under test and mlx-lm 0.31.3
+        run: |
+          python -m pip install --disable-pip-version-check ./src 'mlx-lm==0.31.3'
+          python -m pip list 2>/dev/null | grep -i -E '^(vmlx|mlx|mlx-lm|transformers|huggingface-hub) '
+          git -C src rev-parse HEAD
+      - name: Prefetch model
+        run: python -c "from huggingface_hub import snapshot_download; print(snapshot_download('mlx-community/Qwen3-0.6B-4bit'))"
+      - name: Run acceptance script
+        id: accept
+        env:
+          ITEM: ${{ inputs.item }}
+          ONLY: ${{ inputs.only }}
+          WORK_ROOT: ${{ github.workspace }}/work
+        run: |
+          mkdir -p "$WORK_ROOT"
+          rc=0
+          bash "acceptance/${ITEM}.sh" > run.log 2>&1 || rc=$?
+          echo "acceptance rc=$rc" | tee -a run.log
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+      - name: Print result rows
+        if: always()
+        run: grep -E '^(ENV|SERVER|LOGCTX|RESULT|BODY|SUMMARY|acceptance rc)' run.log || true
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-${{ inputs.item }}
+          path: |
+            run.log
+            work/**
+          if-no-files-found: warn
+      - name: Fail when the script failed
+        if: ${{ steps.accept.outputs.rc != '0' }}
+        run: exit 1
