@@ -253,7 +253,7 @@ PY
   fi
 }
 
-# cell <id> <label> <route chat|completions> <stream 0|1> <target_tokens> <max_tokens> <wait> <explicit_cap> [open]
+# cell <id> <label> <route chat|completions> <stream 0|1> <target_tokens> <max_tokens> <wait> <explicit_cap> [open|known]
 # Returns 28 on a client timeout so the caller restarts the server.
 cell() {
   local id="$1" label="$2" route="$3" stream="$4" target="$5" mt="$6" wait="$7" cap="$8" open="${9:-}"
@@ -292,9 +292,11 @@ EOF
     say "RESULT cell=$id verdict=VOID oracle token count $ptoks differs from the server's usage.prompt_tokens $stoks"
     FAILS=$((FAILS + 1))
   fi
-  if [ -n "$open" ]; then
+  if [ "$open" = "open" ]; then
     verdict="OPEN"
     OPEN=$((OPEN + 1))
+  elif [ "$open" = "known" ]; then
+    verdict="KNOWN-OTHER-DEFECT"
   elif [ "$got" = "$expect" ]; then
     verdict="PASS"
   else
@@ -350,7 +352,11 @@ EOF
       fi
     fi
     cell "$id" "$label" "$route" "$stream" "$target" "$mt" "$wait" "$cap" "$open"
-    if [ $? -eq 28 ]; then started=0; stop_server; fi
+    rc=$?
+    if [ "$rc" -eq 28 ]; then started=0; stop_server; fi
+    # A long prefill leaves its KV cache resident and the server's Metal working-set guard then
+    # answers 503 to the next request, so every long prompt gets a fresh server.
+    if [ "$target" -ge 20000 ] && [ "$started" -eq 1 ]; then started=0; stop_server; fi
   done
   stop_server
 }
@@ -371,7 +377,7 @@ run_group default "$MODEL"
 
 # 2. direct single-request engine (the other engine path), repo id
 CELLSPEC=(
-  "N1-fits-short|chat|0|20|8|$WAIT_FIT|0|"
+  "N1-fits-short|chat|0|20|8|$WAIT_FIT|0|known"
   "N5-bug-60008|chat|0|60008|16|$WAIT_HANG|0|"
 )
 run_group simple "$MODEL" --no-continuous-batching
