@@ -1,0 +1,15 @@
+diff --git a/vmlx_engine/server.py b/vmlx_engine/server.py
+index 150a2db..107b358 100644
+--- a/vmlx_engine/server.py
++++ b/vmlx_engine/server.py
+@@ -905,9 +905,7 @@ def _refresh_loaded_max_prompt_tokens(reason: str) -> int:
+             # Uncached: the CLI's pre-download probes memoize a repo id as
+             # unresolved, and this refresh runs after the download.
+             _declared = _declared_context_limit_from_config(
+-                _read_bundle_json(
+-                    resolve_to_local_path_uncached(_bundle), "config.json"
+-                )
++                _read_bundle_json(_bundle, "config.json")
+             )
+         set_declared_context_tokens(_declared)
+         if _declared > 0:

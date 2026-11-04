@@ -1,0 +1,13 @@
+diff --git a/vmlx_engine/server.py b/vmlx_engine/server.py
+index 150a2db..9b18abd 100644
+--- a/vmlx_engine/server.py
++++ b/vmlx_engine/server.py
+@@ -906,7 +906,7 @@ def _refresh_loaded_max_prompt_tokens(reason: str) -> int:
+             # unresolved, and this refresh runs after the download.
+             _declared = _declared_context_limit_from_config(
+                 _read_bundle_json(
+-                    resolve_to_local_path_uncached(_bundle), "config.json"
++                    __import__("vmlx_engine.api.utils", fromlist=["x"]).resolve_to_local_path(_bundle), "config.json"
+                 )
+             )
+         set_declared_context_tokens(_declared)
