@@ -253,7 +253,7 @@ PY
   fi
 }
 
-# cell <id> <label> <route chat|completions> <stream 0|1> <target_tokens> <max_tokens> <wait> <explicit_cap> [open|known]
+# cell <id> <label> <route chat|completions> <stream 0|1> <target_tokens> <max_tokens> <wait> <explicit_cap> [open|known|clamp]
 # Returns 28 on a client timeout so the caller restarts the server.
 cell() {
   local id="$1" label="$2" route="$3" stream="$4" target="$5" mt="$6" wait="$7" cap="$8" open="${9:-}"
@@ -296,7 +296,19 @@ EOF
     say "RESULT cell=$id verdict=VOID oracle token count $ptoks differs from the token count in the server's message $msgc"
     FAILS=$((FAILS + 1))
   fi
-  if [ "$open" = "open" ]; then
+  if [ "$open" = "clamp" ]; then
+    # Ruled: the existing declared-context clamp activates. Expected output = min(max_tokens, D - P).
+    local remaining=$((D - ptoks)) want
+    want=$mt
+    [ "$remaining" -lt "$want" ] && want=$remaining
+    if [ "$got" = "ok" ] && [ "$ctoks" = "$want" ]; then
+      verdict="PASS"
+    else
+      verdict="FAIL"
+      FAILS=$((FAILS + 1))
+    fi
+    say "CLAMP cell=$id expected_completion_tokens=$want observed_completion_tokens=$ctoks"
+  elif [ "$open" = "open" ]; then
     verdict="OPEN"
     OPEN=$((OPEN + 1))
   elif [ "$open" = "known" ]; then
@@ -372,10 +384,10 @@ CELLSPEC=(
   "C6-bug-60008-stream|chat|1|60008|16|$WAIT_HANG|0|"
   "C8-bug-60008-completions|completions|0|60008|16|$WAIT_HANG|0|"
   "C4-over-by-one|chat|0|$OVER|1|$WAIT_HANG|0|"
-  "C3-at-ceiling|chat|0|$AT|1|$WAIT_HANG|0|open"
+  "C3-at-ceiling|chat|0|$AT|1|$WAIT_HANG|0|"
   "C2-under-by-one|chat|0|$UNDER|1|$WAIT_FIT|0|"
   "C7-under-by-one-stream|chat|1|$UNDER|1|$WAIT_FIT|0|"
-  "C9-fits-output-over-remaining|chat|0|$((D - 4))|64|$WAIT_FIT|0|open"
+  "C9-fits-output-over-remaining|chat|0|$((D - 4))|64|$WAIT_FIT|0|clamp"
 )
 run_group default "$MODEL"
 
