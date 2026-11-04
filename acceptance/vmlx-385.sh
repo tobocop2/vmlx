@@ -8,6 +8,9 @@
 # tokenizer counts the rendered prompt, and the declared context is read from the model's
 # own config.json.
 #
+# The last group launches the repo id against an EMPTY Hugging Face cache (HF_HOME in the work
+# directory), so the server downloads the model during startup. It does not use the prefetch.
+#
 # Env: ONLY (comma list of cell ids, default all), WAIT_HANG, WAIT_FIT, TOTAL_BUDGET, PORT.
 set -u
 
@@ -23,6 +26,7 @@ START_TS=$(date +%s)
 DEADLINE=$((START_TS + TOTAL_BUDGET))
 WORK=$(mktemp -d "${WORK_ROOT:-${TMPDIR:-/tmp}}/vmlx385.XXXXXX")
 SERVER_PID=""
+SERVER_ENV=()
 FAILS=0
 ROWS=0
 OPEN=0
@@ -203,7 +207,7 @@ start_server() {
   shift 2
   stop_server
   SERVER_LOG="$WORK/server-${label}-$(date +%s).log"
-  vmlx serve "$marg" --port "$PORT" "$@" > "$SERVER_LOG" 2>&1 &
+  env ${SERVER_ENV[@]+"${SERVER_ENV[@]}"} vmlx serve "$marg" --port "$PORT" "$@" > "$SERVER_LOG" 2>&1 &
   SERVER_PID=$!
   local i code
   for i in $(seq 1 "$READY_POLLS"); do
@@ -227,6 +231,22 @@ loglines() {
   ROWS=$((ROWS + 1))
   if [ "$ctl" -eq 0 ]; then say "RESULT cell=LOG-$label verdict=VOID control line missing"; FAILS=$((FAILS + 1)); return; fi
   if [ "$dec" -eq 0 ] || [ "$ref" -eq 0 ]; then say "RESULT cell=LOG-$label verdict=FAIL"; FAILS=$((FAILS + 1)); else say "RESULT cell=LOG-$label verdict=PASS"; fi
+}
+
+# coldproof <label> <hf_home>: positive control for the cold group. The cache directory was empty
+# before the launch and the server log shows a download; otherwise the cold cells prove nothing.
+coldproof() {
+  local label="$1" hf="$2" dl blobs
+  dl=$(grep -c 'Fetching [0-9]* files' "$SERVER_LOG")
+  blobs=$(find "$hf" -path '*blobs*' -type f 2>/dev/null | wc -l | tr -d ' ')
+  say "RESULT cell=COLDPROOF-$label cache_empty_before_launch=$COLD_EMPTY download_lines=$dl blobs_after_launch=$blobs expected=empty,download,blobs"
+  ROWS=$((ROWS + 1))
+  if [ "$COLD_EMPTY" = "yes" ] && [ "$dl" -gt 0 ] && [ "$blobs" -gt 0 ]; then
+    say "RESULT cell=COLDPROOF-$label verdict=PASS"
+  else
+    say "RESULT cell=COLDPROOF-$label verdict=VOID the launch was not cold"
+    FAILS=$((FAILS + 1))
+  fi
 }
 
 # capcell <label> <expected: set|unset>: the cap the server reports on /v1/capabilities.
@@ -365,6 +385,7 @@ EOF
         logged=1
         loglines "$label"
         if [ "$label" != "explicit" ]; then capcell "$label"; fi
+        if [ "$label" = "cold" ]; then coldproof "$label" "$COLD_HF"; fi
       fi
     fi
     cell "$id" "$label" "$route" "$stream" "$target" "$mt" "$wait" "$cap" "$open"
@@ -412,6 +433,18 @@ CELLSPEC=(
   "E2-explicit-over|chat|0|9000|8|$WAIT_FIT|8192|"
 )
 run_group explicit "$MODEL" --max-prompt-tokens 8192
+
+# 5. cold cache: the same repo id with an empty Hugging Face cache, so the model downloads during
+# startup (the first launch of a model). The CLI probes the repo id before the download.
+COLD_HF="$WORK/cold-hf"
+mkdir -p "$COLD_HF"
+COLD_EMPTY=$([ -z "$(ls -A "$COLD_HF")" ] && echo yes || echo no)
+SERVER_ENV=(HF_HOME="$COLD_HF")
+CELLSPEC=(
+  "K5-cold-60008|chat|0|60008|16|$WAIT_HANG|0|"
+)
+run_group cold "$MODEL"
+SERVER_ENV=()
 
 stop_server
 say "SUMMARY rows=$ROWS fail=$FAILS open=$OPEN timeouts=$TIMEOUTS elapsed_s=$(( $(date +%s) - START_TS )) work=$WORK"
