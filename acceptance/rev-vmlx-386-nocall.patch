@@ -1,0 +1,19 @@
+diff --git a/vmlx_engine/server.py b/vmlx_engine/server.py
+index cebc50e1..64d76516 100644
+--- a/vmlx_engine/server.py
++++ b/vmlx_engine/server.py
+@@ -897,13 +897,12 @@ def _refresh_loaded_max_prompt_tokens(reason: str) -> int:
+     # separate budgets and conflating them silently is the field-failure
+     # class this exists to prevent.
+     try:
+-        from vmlx_engine.api.utils import resolve_to_local_path
+         from vmlx_engine.context_limits import set_declared_context_tokens
+ 
+         _bundle = _model_path or ""
+         if _bundle:
+             _declared = _declared_context_limit_from_config(
+-                _read_bundle_json(resolve_to_local_path(_bundle), "config.json")
++                _read_bundle_json(_bundle, "config.json")
+             )
+         set_declared_context_tokens(_declared)
+         if _declared > 0:
